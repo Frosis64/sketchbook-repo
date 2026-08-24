@@ -1,0 +1,885 @@
+/* Тема — три варианта хрома приложения (панели/меню/фон вокруг страницы).
+   Сама страница (бумага для рисования) отдельно настраивается через
+   paperColor (белая/тёмно-серая/чёрная) — см. background.ts и
+   CanvasController.setPaperColor(). Тема интерфейса и цвет бумаги — два
+   независимых переключателя, поэтому у .canvas-shadow всегда есть свой
+   видимый бордер (--paper-border) — без него тёмная бумага сливалась бы
+   с тёмным хромом приложения. */
+:root,
+html.theme-light {
+  --bg: #f4f5f9;
+  --sidebar-bg: #fbfbfd;
+  --panel-bg: #ffffff;
+  --border: #e3e6ef;
+  --text: #1f2430;
+  --text-dim: #767c92;
+  --accent: #7c5cff;
+  --hover-bg: #f0f0f7;
+  --active-bg: #e6e1ff;
+  --shadow-rgb: 20, 20, 40;
+  --paper-border: #d0d3de;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+html.theme-dark {
+  --bg: #26282e;
+  --sidebar-bg: #2d2f36;
+  --panel-bg: #34363f;
+  --border: #52555f;
+  --text: #eceef4;
+  --text-dim: #a7abbc;
+  --accent: #a996ff;
+  --hover-bg: #3f424c;
+  --active-bg: #46406e;
+  --shadow-rgb: 0, 0, 0;
+  --paper-border: #5a5d68;
+}
+
+html.theme-black {
+  --bg: #0a0a0c;
+  --sidebar-bg: #151518;
+  --panel-bg: #1e1e23;
+  --border: #3a3a42;
+  --text: #f5f5f8;
+  --text-dim: #a3a7b5;
+  --accent: #ac98ff;
+  --hover-bg: #29292f;
+  --active-bg: #3c3564;
+  --shadow-rgb: 0, 0, 0;
+  --paper-border: #45454e;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", "Inter", system-ui, -apple-system, sans-serif;
+}
+
+#app { height: 100%; }
+
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  height: 100%;
+  /* См. min-height: 0 у .sidebar/.main ниже — без него grid-ячейки не
+     сжимались бы меньше содержимого, и .canvas-scroll не смог бы получить
+     ограниченную высоту: высокая страница (2200px) просто обрезалась бы
+     по низу окна вместо скролла (html/body — overflow: hidden). */
+  min-height: 0;
+  transition: grid-template-columns 0.18s ease;
+}
+
+/* Панель скрыта — колонка схлопывается в 0, сама .sidebar прячется через
+   overflow правила ниже, чтобы не мигало содержимое во время анимации. */
+.layout.sidebar-collapsed {
+  grid-template-columns: 0 1fr;
+}
+.layout.sidebar-collapsed .sidebar {
+  overflow: hidden;
+  border-right: none;
+}
+
+/* Плавающая кнопка "показать панель" — видна только когда панель скрыта. */
+.sidebar-expand-handle {
+  position: fixed;
+  left: 8px;
+  top: 12px;
+  z-index: 500;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  color: var(--text-dim);
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(var(--shadow-rgb), 0.18);
+}
+.sidebar-expand-handle:hover { color: var(--text); background: var(--hover-bg); }
+.layout.sidebar-collapsed + .sidebar-expand-handle { display: flex; }
+
+/* ---------- Sidebar ---------- */
+.sidebar {
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  /* Grid-ячейка по умолчанию не сжимается меньше содержимого — при большом
+     числе блокнотов список тоже не скроллился бы (см. пояснение в .layout). */
+  min-height: 0;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 14px 10px;
+  position: sticky;
+  top: 0;
+  background: var(--sidebar-bg);
+  z-index: 2;
+}
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.theme-picker { position: relative; }
+/* position/top/left выставляются в JS (см. floatingPanel.ts) — панель
+   позиционируется относительно окна по фактическому месту кнопки, а не
+   жёстко "справа от родителя", чтобы никогда не вылезать за край экрана
+   независимо от порядка кнопок в шапке. */
+.theme-panel {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(var(--shadow-rgb), 0.2);
+  z-index: 400;
+}
+.theme-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+.theme-swatch.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- Чип аккаунта (логин/выход) ---------- */
+.account-picker { position: relative; }
+/* position/top/left — см. комментарий у .theme-panel выше. */
+.account-panel {
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  min-width: 190px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(var(--shadow-rgb), 0.2);
+  z-index: 400;
+}
+.account-panel-name {
+  padding: 6px 10px 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.account-panel-link,
+.account-panel-logout {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: none;
+  background: none;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+.account-panel-link:hover,
+.account-panel-logout:hover {
+  background: var(--hover-bg);
+}
+
+.brand {
+  font-weight: 600;
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text);
+}
+.brand svg { flex-shrink: 0; color: var(--accent); }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--text-dim);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+}
+.icon-btn:hover { background: var(--hover-bg); color: var(--text); }
+
+.nb-list { padding: 0 6px 20px; }
+
+.nb-row, .sec-row, .page-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nb-row:hover, .sec-row:hover, .page-row:hover { background: var(--hover-bg); }
+
+.nb-row { font-weight: 600; }
+.nb-row .dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.sec-row { padding-left: 22px; }
+.page-row { padding-left: 44px; color: var(--text); }
+.page-row.active { background: var(--active-bg); color: var(--accent); font-weight: 600; }
+.page-row.add-page { color: var(--text-dim); font-style: normal; }
+
+.chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform .15s ease;
+  color: var(--text-dim);
+  font-size: 12px;
+  width: 12px;
+  flex-shrink: 0;
+}
+.chevron.open { transform: rotate(90deg); }
+
+.row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.section-list, .page-list { display: flex; flex-direction: column; }
+
+/* Context menu */
+.ctx-menu {
+  position: fixed;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(var(--shadow-rgb), 0.18);
+  padding: 4px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+}
+.ctx-menu button {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13.5px;
+  color: var(--text);
+}
+.ctx-menu button:hover { background: var(--hover-bg); }
+.ctx-menu button.danger { color: #d63939; }
+
+/* ---------- Main / toolbar ---------- */
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* То же самое для flex-элемента: без min-height: 0 .canvas-scroll (flex: 1)
+     не сжимался бы до высоты окна и страница не скроллилась. */
+  min-height: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 18px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 14px;
+  border-right: 1px solid var(--border);
+}
+.tool-group:last-child { border-right: none; }
+
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px; height: 34px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.tool-btn:hover { background: var(--hover-bg); }
+.tool-btn.active { background: var(--active-bg); border-color: var(--accent); }
+.tool-btn-text { font-weight: 700; font-size: 15px; font-family: Georgia, serif; }
+
+.color-btn {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.color-btn.active { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.color-custom {
+  width: 26px; height: 26px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.size-label { font-size: 12px; color: var(--text-dim); margin-right: 4px; }
+
+/* ---------- Слоты пера ---------- */
+.pen-slots { gap: 8px; }
+.pen-slot {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(var(--shadow-rgb), 0.15);
+}
+.pen-slot.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.pen-slot-num {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 2px;
+  border-radius: 7px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  font-size: 9px;
+  line-height: 13px;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+/* ---------- Поповер фона страницы ---------- */
+.bg-panel {
+  position: absolute;
+  top: 42px;
+  left: 0;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(var(--shadow-rgb), 0.2);
+  padding: 10px;
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 220px;
+}
+.bg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bg-row-label {
+  width: 52px;
+  font-size: 12px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.bg-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background-color: white;
+  cursor: pointer;
+}
+.bg-swatch.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.bg-panel-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 0;
+}
+.paper-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.paper-swatch.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.page-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 28px 0;
+  background: var(--bg);
+}
+.page-title-input {
+  border: none;
+  background: transparent;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+  outline: none;
+  width: 60%;
+}
+.save-indicator {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.save-indicator.busy { color: var(--accent); }
+
+.canvas-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 24px 28px 60px;
+  background: var(--bg);
+}
+
+.canvas-shadow {
+  position: relative;
+  display: inline-block;
+  box-shadow: 0 4px 20px rgba(var(--shadow-rgb), 0.25);
+  border-radius: 6px;
+  /* Видимая граница страницы — не зависит от цвета бумаги и от темы
+     интерфейса, иначе тёмная/чёрная бумага сливалась бы с тёмным хромом
+     (одна лишь box-shadow на чёрном фоне не видна). Сам фон бумаги
+     задаётся инлайн-стилем из main.ts по текущему page.paperColor. */
+  border: 1px solid var(--paper-border);
+}
+
+/* Слои страницы уложены явными z-index (а не порядком в DOM), чтобы
+   canvas рисования оказался НАД слоем картинок, а фон страницы — под ним:
+   0 фон (бумага/сетка) → 1 картинки → 2 рисование → 3 текст → 4 выделение.
+   Так перо/маркер видимо рисуют поверх вставленных изображений, при этом
+   сама бумага остаётся ниже картинок. См. пояснение в CanvasController. */
+#page-bg-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: block;
+  border-radius: 6px;
+}
+
+#page-canvas {
+  position: relative;
+  z-index: 2;
+  display: block;
+  border-radius: 6px;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* ---------- Text layer ---------- */
+.text-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+/* "editable" (инструмент "Текст"): вся страница кликабельна — клик по
+   пустому месту создаёт новый блок. */
+.text-layer.editable {
+  pointer-events: auto;
+  cursor: text;
+}
+/* "interactive" (инструмент "Курсор"): сам контейнер остаётся прозрачным
+   для кликов (пустое место проваливается к картинкам/холсту ниже), но
+   каждый СУЩЕСТВУЮЩИЙ блок кликабелен — см. правило ниже. */
+
+.text-block {
+  position: absolute;
+  /* Блок кликабелен только когда активен инструмент "Текст" или "Курсор" —
+     иначе он перехватывал бы клики пера/ластика и мешал рисовать поверх
+     заметок. */
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.001);
+  border: 1px dashed transparent;
+  border-radius: 4px;
+}
+.text-layer.editable .text-block,
+.text-layer.interactive .text-block {
+  pointer-events: auto;
+}
+.text-block:hover,
+.text-block:focus-within {
+  border-color: #c9cbe6;
+}
+
+.text-block-grip {
+  position: absolute;
+  top: -18px;
+  left: -2px;
+  width: 22px;
+  height: 16px;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--text-dim);
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: move;
+  opacity: 0;
+  transition: opacity .1s;
+}
+.text-block:hover .text-block-grip,
+.text-block:focus-within .text-block-grip {
+  opacity: 1;
+}
+
+.text-block-content {
+  width: 100%;
+  height: 100%;
+  padding: 4px 6px;
+  outline: none;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--text);
+  overflow: auto;
+  cursor: text;
+}
+.text-block-content:empty::before {
+  content: "Введите текст…";
+  color: #b7bacb;
+  pointer-events: none;
+}
+.text-block-content h2 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+.text-block-content p {
+  margin: 0;
+}
+
+.text-block-resize {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--accent);
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity .1s;
+}
+.text-block:hover .text-block-resize,
+.text-block:focus-within .text-block-resize {
+  opacity: 1;
+}
+
+.text-block-delete {
+  position: absolute;
+  top: -26px;
+  right: -6px;
+  width: 26px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: #d63939;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .1s, background .1s;
+}
+.text-block-delete:hover { background: #fdeaea; }
+.text-block:hover .text-block-delete,
+.text-block:focus-within .text-block-delete {
+  opacity: 1;
+}
+
+/* Панель форматирования текста закреплена сверху (не летает за блоком) —
+   так её проще найти и она не улетает за край экрана у блоков возле края
+   страницы. Положение (top) выставляется в textLayer.ts сразу под основной
+   панелью инструментов. */
+.text-format-toolbar {
+  position: fixed;
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(var(--shadow-rgb), 0.22);
+  z-index: 500;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.text-format-toolbar button {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--text);
+}
+.text-format-toolbar button:hover { background: var(--hover-bg); }
+.text-format-toolbar select {
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 12px;
+}
+.text-format-toolbar input[type="color"] {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+/* ---------- Слой вставленных изображений ---------- */
+.image-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  /* Картинки видимы и на превью всегда, но перетаскивать/масштабировать их
+     можно только пока активен инструмент "Изображение" — иначе они мешали
+     бы рисовать поверх/вокруг них другими инструментами (как text-layer).
+     Сам canvas рисования лежит НАД этим слоем (z-index: 2) — см. пояснение
+     у #page-canvas — поэтому пока инструмент "Изображение" не активен, он
+     же (не image-layer) перехватывает клики, что и нужно для рисования. */
+  pointer-events: none;
+}
+.image-layer.tool-active { pointer-events: auto; }
+
+.image-block {
+  position: absolute;
+  pointer-events: none;
+  border: 1px dashed transparent;
+  border-radius: 2px;
+}
+.image-layer.tool-active .image-block {
+  pointer-events: auto;
+  cursor: move;
+}
+.image-block:hover,
+.image-block.dragging {
+  border-color: var(--accent);
+}
+.image-block img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.image-block-resize {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  background: var(--accent);
+  border: 2px solid var(--panel-bg);
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity .1s;
+}
+.image-block:hover .image-block-resize,
+.image-block.dragging .image-block-resize {
+  opacity: 1;
+}
+
+.image-block-delete {
+  position: absolute;
+  top: -28px;
+  right: -6px;
+  width: 28px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: #d63939;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .1s, background .1s;
+}
+.image-block-delete:hover { background: #fdeaea; }
+.image-block:hover .image-block-delete {
+  opacity: 1;
+}
+
+/* ---------- Слой выделения (двигать/масштабировать/искажать/вращать) ---------- */
+.selection-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  user-select: none;
+}
+.selection-layer.tool-active {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.sel-lasso-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+.sel-lasso-shape {
+  fill: rgba(124, 92, 255, 0.12);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.sel-box {
+  position: absolute;
+  display: none;
+  box-sizing: border-box;
+  border: 1.5px dashed var(--accent);
+  background: rgba(124, 92, 255, 0.04);
+  cursor: move;
+  pointer-events: none;
+}
+.selection-layer.tool-active .sel-box {
+  pointer-events: auto;
+}
+
+.sel-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--panel-bg);
+  border: 2px solid var(--accent);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.selection-layer.tool-active .sel-handle {
+  pointer-events: auto;
+}
+.sel-handle-nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.sel-handle-ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.sel-handle-sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.sel-handle-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.sel-handle-n { left: 50%; top: -6px; transform: translateX(-50%); cursor: ns-resize; }
+.sel-handle-s { left: 50%; bottom: -6px; transform: translateX(-50%); cursor: ns-resize; }
+.sel-handle-e { right: -6px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+.sel-handle-w { left: -6px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+
+.sel-rotate-stem {
+  position: absolute;
+  left: 50%;
+  top: -24px;
+  width: 1px;
+  height: 24px;
+  background: var(--accent);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.sel-rotate {
+  position: absolute;
+  left: 50%;
+  top: -34px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--panel-bg);
+  border: 2px solid var(--accent);
+  transform: translateX(-50%);
+  cursor: grab;
+  pointer-events: none;
+}
+.selection-layer.tool-active .sel-rotate {
+  pointer-events: auto;
+}
+
+.sel-delete {
+  position: absolute;
+  top: -32px;
+  right: -6px;
+  width: 28px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: #d63939;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: none;
+  transition: background .1s;
+}
+.sel-delete:hover { background: #fdeaea; }
+.selection-layer.tool-active .sel-delete {
+  pointer-events: auto;
+}

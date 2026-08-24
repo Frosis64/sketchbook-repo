@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/pen.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Аккаунт — Скетчбук</title>
+    <link rel="stylesheet" href="/admin.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a href="/" class="back"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><path d="M11 6l-6 6 6 6"/></svg> К заметкам</a>
+      <div class="title" id="page-title">Аккаунт</div>
+      <button id="logout-btn" class="ghost-btn">Выйти</button>
+    </header>
+
+    <main class="wrap">
+      <section class="card" id="admin-only-create" hidden>
+        <h2>Добавить пользователя</h2>
+        <form id="create-form" class="row">
+          <input type="text" id="new-username" placeholder="Логин" required autocomplete="off" />
+          <input type="password" id="new-password" placeholder="Пароль (мин. 6 символов)" required autocomplete="new-password" />
+          <label class="checkbox">
+            <input type="checkbox" id="new-is-admin" />
+            Администратор
+          </label>
+          <button type="submit">Добавить</button>
+        </form>
+        <div id="create-error" class="error" hidden></div>
+      </section>
+
+      <section class="card" id="admin-only-list" hidden>
+        <h2>Пользователи</h2>
+        <table id="users-table">
+          <thead>
+            <tr>
+              <th>Логин</th>
+              <th>Роль</th>
+              <th>Создан</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="users-body"></tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <h2>Сменить свой пароль</h2>
+        <form id="change-password-form" class="row">
+          <input type="password" id="old-password" placeholder="Текущий пароль" required autocomplete="current-password" />
+          <input type="password" id="new-own-password" placeholder="Новый пароль" required autocomplete="new-password" />
+          <button type="submit">Сменить</button>
+        </form>
+        <div id="password-error" class="error" hidden></div>
+        <div id="password-ok" class="ok" hidden>Пароль изменён</div>
+      </section>
+    </main>
+
+    <script src="/admin.js"></script>
+  </body>
+</html>
