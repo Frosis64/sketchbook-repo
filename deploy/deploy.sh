@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
-# Разворачивает Скетчбук на notes.frosis.kz: копирует frontend+server в
+# Разворачивает Скетчбук на вашем сервере: копирует frontend+server в
 # /opt/notes-app, ставит python-зависимости в venv, поднимает systemd-сервис
 # с gunicorn, настраивает nginx-сайт и выпускает HTTPS через certbot.
 #
-# Запускать НА СЕРВЕРЕ (frosis.kz), с правами root, из корня распакованного
-# архива — то есть там, где лежат папки frontend/ и server/ рядом с этим
-# скриптом:
-#   sudo bash deploy/deploy.sh
+# Запускать НА СЕРВЕРЕ, с правами root, из корня распакованного архива —
+# то есть там, где лежат папки frontend/ и server/ рядом с этим скриптом,
+# указав свой домен через переменную окружения DOMAIN:
+#   sudo DOMAIN=notes.example.com bash deploy/deploy.sh
 #
 # Скрипт идемпотентен — можно запускать повторно после обновления сборки
 # (просто замените содержимое frontend/, см. README.md "Обновление").
 
 set -euo pipefail
 
-DOMAIN="notes.frosis.kz"
+if [[ -z "${DOMAIN:-}" ]]; then
+  echo "Укажите домен через переменную окружения, например:" >&2
+  echo "  sudo DOMAIN=notes.example.com bash deploy/deploy.sh" >&2
+  exit 1
+fi
 APP_DIR="/opt/notes-app"
 PORT="8091"
 SERVICE_NAME="notes-app"
