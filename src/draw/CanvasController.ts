@@ -29,6 +29,7 @@
 import type { Page, Stroke, StrokePoint, ToolType } from "../types";
 import { backgroundPattern } from "./background";
 import { paintStrokeIncrement, paintStrokeOpaque } from "./render";
+import { smoothStrokePoints } from "./curve";
 
 export interface ToolSettings {
   tool: ToolType;
@@ -428,11 +429,20 @@ export class CanvasController {
       }
     }
     if (this.current.points.length >= 1) {
+      // Насыщаем штрих промежуточными точками по сплайну Catmull-Rom —
+      // иначе быстро нарисованная кривая (например, окружность от руки)
+      // выглядит гранёной: pointermove срабатывает тем реже, чем быстрее
+      // движение, и прямые отрезки между редкими точками становятся
+      // заметны на изгибах (см. curve.ts). Пересчитываем один раз по
+      // завершении штриха и перерисовываем scratch заново уже плотными
+      // точками — во время самого рисования используется более редкая
+      // "сырая" трасса ради отзывчивости.
+      this.current.points = smoothStrokePoints(this.current.points);
       this.strokes.push(this.current);
       this.history.push({ type: "add", stroke: this.current });
       this.future = [];
-      // scratch уже содержит готовую растеризацию штриха — просто
-      // "припечатываем" его к базовому слою, не пересчитывая всё заново.
+      this.clearScratch();
+      paintStrokeOpaque(this.scratchCtx, this.current);
       this.compositeScratchOnto(this.baseCtx, this.current.opacity);
       this.emitChange();
     }
